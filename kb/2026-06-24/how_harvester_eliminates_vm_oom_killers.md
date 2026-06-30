@@ -115,7 +115,7 @@ As shown below, multiple helper processes must live alongside the primary qemu-s
 
 #### Breaking Down the Memory Overhead Buffer
 
-When you define a virtual machine—for example, a VM configured with **4 vCPUs, 2 GiB of memory, and 1 Ethernet interface**—KubeVirt does not just allocate exactly 2 GiB of memory to the container. 
+When you define a virtual machine, for example, a VM configured with **4 vCPUs, 2 GiB of memory, and 1 Ethernet interface**, KubeVirt does not just allocate exactly 2 GiB of memory to the container. 
 
 Instead, KubeVirt calculates an additional baseline memory overhead required to operate the virtualization stack. This overhead budget covers:
 
@@ -158,10 +158,6 @@ For specific virtual machines running intensive or non-standard workloads, a glo
 > ⚠️ **Under the Hood Memory Carving:**
 > When you configure this setting, Harvester explicitly scales down the available memory presented to the Guest OS inside the VM. For example, if a VM is configured with **2 GiB** of memory and you set a Reserved Memory value of **256 MiB**, the Guest OS will only see and utilize **1.75 GiB** (`2 GiB - 256 MiB`).
 
-This mechanism implicitly and securely saves that carved-out space exclusively for helper tasks, altering the memory calculation logic as follows:
-
-**Total Memory Overhead** = **Auto-calculated Overhead**  * **Ratio** + **Reserved Memory**
-
 #### Why Use Per-VM Reserved Memory?
 
 * **Guaranteed Overhead Headroom:** By restricting the Guest OS from consuming the top slice of its configured allocation, you guarantee an isolated, un-evictable memory runway for host helper tasks.
@@ -169,6 +165,12 @@ This mechanism implicitly and securely saves that carved-out space exclusively f
 * **Targeted Safety for Heavy Workloads:** This mechanism is highly practical for mission-critical, high-performance, or special-purpose workloads (such as nested virtualization layers or intensive database engines). It effectively prevents the VM from running into host-level cgroup OOM termination by proactively limiting its internal usage boundaries, removing the risk of unexpected node-level kills.
 
 * **Optimized Cluster Usability:** Using per-VM reservations eliminates the major disadvantage of cranking up the global `additional-guest-memory-overhead-ratio` for the whole cluster. Instead of forcing a massive, wasteful memory overhead reservation across *every* idle or lightweight VM on your hosts, you can maintain a lean global default and surgically protect only the heavy workloads—striking an ideal balance between system density and ironclad stability.
+
+### Outcome: Guaranteed Workload Stability
+
+By leveraging this dual-layer tunable memory architecture, Harvester fundamentally alters how host-level overhead is calculated, moving from rigid, generalized defaults to a precise, tiered enforcement model:
+
+**Total Memory Overhead** = **Auto-calculated Overhead**  * **Ratio** + **Reserved Memory**
 
 ## Best Practices & Configuration Matrix
 
@@ -196,7 +198,7 @@ When optimizing your Harvester cluster to eliminate host-level container OOM eve
 
 ## Quick Summary
 
-*   **The Problem:** In Harvester's Kubernetes-native architecture, every virtual machine is bound by a strict Pod container limit. While this rigid cgroup boundary is essential for security—ensuring a single rogue or leaking VM can never starve neighboring workloads or crash the bare-metal host—it means heavy storage/network I/O, device drivers, or GPU passthrough can cause internal helper processes to breach this hard ceiling, triggering a sudden host-level OOM kill.
+*   **The Problem:** In Harvester's Kubernetes-native architecture, every virtual machine is bound by a strict Pod container limit. While this rigid cgroup boundary is essential for security, ensuring a single rogue or leaking VM can never starve neighboring workloads or crash the bare-metal host, it means heavy storage/network I/O, device drivers, or GPU passthrough can cause internal helper processes to breach this hard ceiling, triggering a sudden host-level OOM kill.
 
 *   **The Solution:** Harvester eliminates these crashes without losing secure resource control using a dual-layer memory tuning strategy:
     *   **Globally:** The `additional-guest-memory-overhead-ratio` scales out a safety cushion cluster-wide for newly created or migrated VMs.
@@ -210,4 +212,4 @@ The simulation process highlights a fundamental truth about modern virtualizatio
 
 *   **The Guest OS is Trustworthy:** Testing shows that modern guest operating systems handle internal resource limits reliably. If a runaway application inside the guest OS eats up all available RAM, the guest kernel safely steps in and kills that specific process internally. The VM itself survives, and from the host's perspective, the virtual machine continues running normally.
 
-*   **The Host Cgroup Boundary is the Weak Link:** The true host-level crash only happens if processes inside the host cgroup expand unexpectedly. If an infrastructure task or helper process inside the Pod container balloons, it consumes the memory buffer that KubeVirt set aside, causing the entire cgroup—the VM's carrier—to slam into the hard Kubernetes ceiling and trigger a host-level OOM kill.
+*   **The Host Cgroup Boundary is the Weak Link:** The true host-level crash only happens if processes inside the host cgroup expand unexpectedly. If an infrastructure task or helper process inside the Pod container balloons, it consumes the memory buffer that KubeVirt set aside, causing the entire cgroup, the VM's carrier, to slam into the hard Kubernetes ceiling and trigger a host-level OOM kill.
